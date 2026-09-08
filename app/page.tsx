@@ -18,10 +18,137 @@ type Room = {
   status: string;
   game_id: string | null;
   started_at: string | null;
+  current_round: number;
 };
 
+type Round = {
+  number: number;
+  title: string;
+  subtitle: string;
+  answer: string;
+  player1: React.ReactNode;
+  player2: React.ReactNode;
+};
+
+const rounds: Round[] = [
+  {
+    number: 1,
+    title: "THE VAULT",
+    subtitle: "Find the first 4-digit combination.",
+    answer: "8634",
+    player1: (
+      <div className="space-y-5">
+        <div>
+          <p className="text-zinc-500 text-sm">CODE ORDER</p>
+          <p className="text-2xl font-bold mt-1">☀️ → 🔑 → 🌊 → 🌙</p>
+        </div>
+
+        <div className="border-t border-zinc-800 pt-5">
+          <p>
+            ☀️ SUN = <strong>8</strong>
+          </p>
+        </div>
+
+        <p>
+          🌊 WAVE is <strong>3 less than KEY</strong>.
+        </p>
+      </div>
+    ),
+    player2: (
+      <div className="space-y-5">
+        <p>
+          🔑 KEY = <strong>6</strong>
+        </p>
+
+        <p>
+          🌙 MOON is <strong>half of SUN</strong>.
+        </p>
+
+        <p>No digit appears twice.</p>
+      </div>
+    ),
+  },
+
+  {
+    number: 2,
+    title: "INNER LOCK",
+    subtitle: "A second lock blocks the vault.",
+    answer: "3573",
+    player1: (
+      <div className="space-y-5">
+        <div>
+          <p className="text-zinc-500 text-sm">CODE ORDER</p>
+          <p className="text-2xl font-bold mt-1">🌲 → 👑 → ⚡ → 👁️</p>
+        </div>
+
+        <div className="border-t border-zinc-800 pt-5">
+          <p>
+            🌲 TREE = <strong>3</strong>
+          </p>
+        </div>
+
+        <p>
+          ⚡ BOLT is <strong>2 more than CROWN</strong>.
+        </p>
+      </div>
+    ),
+    player2: (
+      <div className="space-y-5">
+        <p>
+          👑 CROWN = <strong>5</strong>
+        </p>
+
+        <p>
+          👁️ EYE is <strong>4 less than BOLT</strong>.
+        </p>
+
+        <p>The first and final digits match.</p>
+      </div>
+    ),
+  },
+
+  {
+    number: 3,
+    title: "MASTER LOCK",
+    subtitle: "One final combination remains.",
+    answer: "9436",
+    player1: (
+      <div className="space-y-5">
+        <div>
+          <p className="text-zinc-500 text-sm">CODE ORDER</p>
+          <p className="text-2xl font-bold mt-1">💎 → 🕒 → 🐦 → 🔒</p>
+        </div>
+
+        <div className="border-t border-zinc-800 pt-5">
+          <p>
+            💎 DIAMOND = <strong>9</strong>
+          </p>
+        </div>
+
+        <p>
+          🐦 BIRD is <strong>1 less than CLOCK</strong>.
+        </p>
+      </div>
+    ),
+    player2: (
+      <div className="space-y-5">
+        <p>
+          🕒 CLOCK = <strong>4</strong>
+        </p>
+
+        <p>
+          🔒 LOCK = <strong>DIAMOND minus BIRD</strong>.
+        </p>
+
+        <p>Every digit is different.</p>
+      </div>
+    ),
+  },
+];
+
 export default function Home() {
-  const [mode, setMode] = useState<"home" | "host" | "join" | "lobby">("home");
+  const [mode, setMode] =
+    useState<"home" | "host" | "join" | "lobby">("home");
 
   const [name, setName] = useState("");
   const [joinCode, setJoinCode] = useState("");
@@ -35,6 +162,11 @@ export default function Home() {
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+
+  const currentRound =
+    room?.current_round
+      ? rounds.find((r) => r.number === room.current_round)
+      : null;
 
   function generateRoomCode() {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -94,6 +226,11 @@ export default function Home() {
     };
   }, [room?.id]);
 
+  useEffect(() => {
+    setAnswer("");
+    setGameMessage("");
+  }, [room?.current_round]);
+
   async function createGame() {
     if (!name.trim()) {
       setError("Enter your name first.");
@@ -110,6 +247,7 @@ export default function Home() {
       .insert({
         code,
         status: "waiting",
+        current_round: 1,
       })
       .select()
       .single();
@@ -228,7 +366,8 @@ export default function Home() {
       .from("rooms")
       .update({
         status: "playing",
-        game_id: "vault_001",
+        game_id: "vault_test",
+        current_round: 1,
         started_at: new Date().toISOString(),
       })
       .eq("id", room.id)
@@ -244,9 +383,17 @@ export default function Home() {
   }
 
   async function submitAnswer() {
-    if (!room) return;
+    if (!room || !currentRound) return;
 
-    if (answer === "8634") {
+    if (answer !== currentRound.answer) {
+      setGameMessage("Wrong code. Try again.");
+      setAnswer("");
+      return;
+    }
+
+    const isFinalRound = currentRound.number === rounds.length;
+
+    if (isFinalRound) {
       const { data, error } = await supabase
         .from("rooms")
         .update({
@@ -262,10 +409,27 @@ export default function Home() {
       }
 
       setRoom(data);
-    } else {
-      setGameMessage("Wrong code. Try again.");
-      setAnswer("");
+      return;
     }
+
+    const nextRound = currentRound.number + 1;
+
+    const { data, error } = await supabase
+      .from("rooms")
+      .update({
+        current_round: nextRound,
+      })
+      .eq("id", room.id)
+      .eq("current_round", currentRound.number)
+      .select()
+      .single();
+
+    if (error) {
+      setGameMessage(error.message);
+      return;
+    }
+
+    setRoom(data);
   }
 
   function goHome() {
@@ -285,7 +449,7 @@ export default function Home() {
       <main className="min-h-screen flex items-center justify-center bg-zinc-950 text-white p-6">
         <div className="text-center">
           <p className="text-sm tracking-[0.3em] text-zinc-500 uppercase">
-            The Vault
+            Mission Complete
           </p>
 
           <h1 className="text-6xl font-black mt-6">
@@ -293,7 +457,7 @@ export default function Home() {
           </h1>
 
           <p className="text-zinc-400 mt-4">
-            You put the clues together.
+            You solved all 3 locks together.
           </p>
 
           <div className="text-7xl mt-8">
@@ -311,22 +475,35 @@ export default function Home() {
     );
   }
 
-  if (room?.status === "playing") {
+  if (room?.status === "playing" && currentRound) {
     return (
       <main className="min-h-screen flex items-center justify-center bg-zinc-950 text-white p-6">
         <div className="w-full max-w-md">
 
+          <div className="flex justify-center gap-2 mb-8">
+            {rounds.map((r) => (
+              <div
+                key={r.number}
+                className={`h-2 w-16 rounded-full ${
+                  r.number <= currentRound.number
+                    ? "bg-white"
+                    : "bg-zinc-800"
+                }`}
+              />
+            ))}
+          </div>
+
           <div className="text-center mb-10">
             <p className="text-sm uppercase tracking-[0.3em] text-zinc-500">
-              Mission 01
+              Round {currentRound.number} of {rounds.length}
             </p>
 
             <h1 className="text-4xl font-black mt-3">
-              THE VAULT
+              {currentRound.title}
             </h1>
 
             <p className="text-zinc-400 mt-3">
-              Find the 4-digit combination.
+              {currentRound.subtitle}
             </p>
           </div>
 
@@ -335,45 +512,11 @@ export default function Home() {
               Your Half
             </p>
 
-            {myPlayerNumber === 1 ? (
-              <div className="mt-6 space-y-5">
-                <div>
-                  <p className="text-zinc-500 text-sm">
-                    CODE ORDER
-                  </p>
-
-                  <p className="text-2xl font-bold mt-1">
-                    ☀️ → 🔑 → 🌊 → 🌙
-                  </p>
-                </div>
-
-                <div className="border-t border-zinc-800 pt-5">
-                  <p>
-                    ☀️ SUN = <strong>8</strong>
-                  </p>
-                </div>
-
-                <div>
-                  <p>
-                    🌊 WAVE is <strong>3 less than KEY</strong>.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              <div className="mt-6 space-y-5">
-                <p>
-                  🔑 KEY = <strong>6</strong>
-                </p>
-
-                <p>
-                  🌙 MOON is <strong>half of SUN</strong>.
-                </p>
-
-                <p>
-                  No digit appears twice.
-                </p>
-              </div>
-            )}
+            <div className="mt-6">
+              {myPlayerNumber === 1
+                ? currentRound.player1
+                : currentRound.player2}
+            </div>
           </div>
 
           <p className="text-center text-zinc-500 text-sm mt-5">
@@ -382,7 +525,7 @@ export default function Home() {
 
           <div className="mt-10">
             <label className="text-sm text-zinc-400">
-              Vault code
+              Combination
             </label>
 
             <input
@@ -411,7 +554,7 @@ export default function Home() {
               disabled={answer.length !== 4}
               className="mt-4 w-full rounded-2xl bg-white text-black font-bold text-xl py-5 disabled:opacity-30"
             >
-              UNLOCK VAULT
+              SUBMIT CODE
             </button>
           </div>
         </div>
@@ -468,7 +611,7 @@ export default function Home() {
                   onClick={startGame}
                   className="mt-6 w-full rounded-2xl bg-white text-black font-bold text-xl py-5"
                 >
-                  START THE VAULT
+                  START GAME
                 </button>
               ) : (
                 <p className="mt-5 text-zinc-500">
@@ -584,7 +727,7 @@ export default function Home() {
                     .slice(0, 4)
                 )
               }
-              placeholder="9GWD"
+              placeholder="AB7K"
               maxLength={4}
               className="w-full rounded-2xl bg-zinc-900 border border-zinc-700 px-5 py-4 text-center text-3xl font-bold tracking-[0.4em] outline-none"
             />
