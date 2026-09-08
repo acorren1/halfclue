@@ -17,6 +17,7 @@ type Room = {
   code: string;
   status: string;
   game_id: string | null;
+  started_at: string | null;
 };
 
 export default function Home() {
@@ -27,6 +28,10 @@ export default function Home() {
 
   const [room, setRoom] = useState<Room | null>(null);
   const [players, setPlayers] = useState<Player[]>([]);
+  const [myPlayerNumber, setMyPlayerNumber] = useState<number | null>(null);
+
+  const [answer, setAnswer] = useState("");
+  const [gameMessage, setGameMessage] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -46,12 +51,9 @@ export default function Home() {
       .eq("room_id", roomId)
       .order("player_number");
 
-    if (error) {
-      console.error(error);
-      return;
+    if (!error) {
+      setPlayers(data ?? []);
     }
-
-    setPlayers(data ?? []);
   }
 
   useEffect(() => {
@@ -71,6 +73,18 @@ export default function Home() {
         },
         () => {
           loadPlayers(room.id);
+        }
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "rooms",
+          filter: `id=eq.${room.id}`,
+        },
+        (payload) => {
+          setRoom(payload.new as Room);
         }
       )
       .subscribe();
@@ -125,6 +139,7 @@ export default function Home() {
 
     setRoom(newRoom);
     setPlayers([hostPlayer]);
+    setMyPlayerNumber(1);
     setMode("lobby");
     setLoading(false);
   }
@@ -201,8 +216,56 @@ export default function Home() {
 
     setRoom(foundRoom);
     setPlayers([...(existingPlayers ?? []), newPlayer]);
+    setMyPlayerNumber(2);
     setMode("lobby");
     setLoading(false);
+  }
+
+  async function startGame() {
+    if (!room) return;
+
+    const { data, error } = await supabase
+      .from("rooms")
+      .update({
+        status: "playing",
+        game_id: "vault_001",
+        started_at: new Date().toISOString(),
+      })
+      .eq("id", room.id)
+      .select()
+      .single();
+
+    if (error) {
+      setGameMessage(error.message);
+      return;
+    }
+
+    setRoom(data);
+  }
+
+  async function submitAnswer() {
+    if (!room) return;
+
+    if (answer === "8634") {
+      const { data, error } = await supabase
+        .from("rooms")
+        .update({
+          status: "won",
+        })
+        .eq("id", room.id)
+        .select()
+        .single();
+
+      if (error) {
+        setGameMessage(error.message);
+        return;
+      }
+
+      setRoom(data);
+    } else {
+      setGameMessage("Wrong code. Try again.");
+      setAnswer("");
+    }
   }
 
   function goHome() {
@@ -211,7 +274,149 @@ export default function Home() {
     setJoinCode("");
     setRoom(null);
     setPlayers([]);
+    setMyPlayerNumber(null);
+    setAnswer("");
+    setGameMessage("");
     setError("");
+  }
+
+  if (room?.status === "won") {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-zinc-950 text-white p-6">
+        <div className="text-center">
+          <p className="text-sm tracking-[0.3em] text-zinc-500 uppercase">
+            The Vault
+          </p>
+
+          <h1 className="text-6xl font-black mt-6">
+            VAULT OPEN
+          </h1>
+
+          <p className="text-zinc-400 mt-4">
+            You put the clues together.
+          </p>
+
+          <div className="text-7xl mt-8">
+            🔓
+          </div>
+
+          <button
+            onClick={goHome}
+            className="mt-12 rounded-2xl bg-white text-black font-bold px-8 py-4"
+          >
+            BACK TO HOME
+          </button>
+        </div>
+      </main>
+    );
+  }
+
+  if (room?.status === "playing") {
+    return (
+      <main className="min-h-screen flex items-center justify-center bg-zinc-950 text-white p-6">
+        <div className="w-full max-w-md">
+
+          <div className="text-center mb-10">
+            <p className="text-sm uppercase tracking-[0.3em] text-zinc-500">
+              Mission 01
+            </p>
+
+            <h1 className="text-4xl font-black mt-3">
+              THE VAULT
+            </h1>
+
+            <p className="text-zinc-400 mt-3">
+              Find the 4-digit combination.
+            </p>
+          </div>
+
+          <div className="rounded-3xl border border-zinc-800 bg-zinc-900 p-6">
+            <p className="text-xs uppercase tracking-[0.25em] text-zinc-500">
+              Your Half
+            </p>
+
+            {myPlayerNumber === 1 ? (
+              <div className="mt-6 space-y-5">
+                <div>
+                  <p className="text-zinc-500 text-sm">
+                    CODE ORDER
+                  </p>
+
+                  <p className="text-2xl font-bold mt-1">
+                    ☀️ → 🔑 → 🌊 → 🌙
+                  </p>
+                </div>
+
+                <div className="border-t border-zinc-800 pt-5">
+                  <p>
+                    ☀️ SUN = <strong>8</strong>
+                  </p>
+                </div>
+
+                <div>
+                  <p>
+                    🌊 WAVE is <strong>3 less than KEY</strong>.
+                  </p>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-6 space-y-5">
+                <p>
+                  🔑 KEY = <strong>6</strong>
+                </p>
+
+                <p>
+                  🌙 MOON is <strong>half of SUN</strong>.
+                </p>
+
+                <p>
+                  No digit appears twice.
+                </p>
+              </div>
+            )}
+          </div>
+
+          <p className="text-center text-zinc-500 text-sm mt-5">
+            Do not show your screen. Talk to your partner.
+          </p>
+
+          <div className="mt-10">
+            <label className="text-sm text-zinc-400">
+              Vault code
+            </label>
+
+            <input
+              value={answer}
+              onChange={(e) =>
+                setAnswer(
+                  e.target.value.replace(/\D/g, "").slice(0, 4)
+                )
+              }
+              onKeyDown={(e) => {
+                if (e.key === "Enter") submitAnswer();
+              }}
+              inputMode="numeric"
+              placeholder="••••"
+              className="mt-2 w-full rounded-2xl bg-zinc-900 border border-zinc-700 px-5 py-4 text-center text-4xl font-bold tracking-[0.5em] outline-none"
+            />
+
+            {gameMessage && (
+              <p className="text-center text-red-400 mt-3 text-sm">
+                {gameMessage}
+              </p>
+            )}
+
+            <button
+              onClick={submitAnswer}
+              disabled={answer.length !== 4}
+              className="mt-4 w-full rounded-2xl bg-white text-black font-bold text-xl py-5 disabled:opacity-30"
+            >
+              UNLOCK VAULT
+            </button>
+          </div>
+        </div>
+      </main>
+    );
   }
 
   if (mode === "lobby" && room) {
@@ -220,6 +425,7 @@ export default function Home() {
     return (
       <main className="min-h-screen flex items-center justify-center bg-zinc-950 text-white p-6">
         <div className="w-full max-w-md text-center">
+
           <p className="text-sm uppercase tracking-[0.3em] text-zinc-500">
             Room Code
           </p>
@@ -251,39 +457,38 @@ export default function Home() {
             )}
           </div>
 
-          <div className="mt-10">
-            {secondPlayerJoined ? (
-              <>
-                <p className="text-lg font-bold">
-                  BOTH PLAYERS CONNECTED
-                </p>
+          {secondPlayerJoined ? (
+            <>
+              <p className="mt-8 font-bold">
+                BOTH PLAYERS CONNECTED
+              </p>
 
-                <p className="text-zinc-500 mt-2">
-                  Ready to play.
+              {myPlayerNumber === 1 ? (
+                <button
+                  onClick={startGame}
+                  className="mt-6 w-full rounded-2xl bg-white text-black font-bold text-xl py-5"
+                >
+                  START THE VAULT
+                </button>
+              ) : (
+                <p className="mt-5 text-zinc-500">
+                  Waiting for the host to start...
                 </p>
-              </>
-            ) : (
-              <>
-                <p className="text-zinc-400">
-                  Share the room code with another player.
-                </p>
-
-                <div className="mt-4 flex items-center justify-center gap-2">
-                  <span className="h-2 w-2 rounded-full bg-white animate-pulse" />
-                  <span className="text-sm text-zinc-500">
-                    Waiting...
-                  </span>
-                </div>
-              </>
-            )}
-          </div>
+              )}
+            </>
+          ) : (
+            <p className="mt-8 text-zinc-500">
+              Waiting for another player...
+            </p>
+          )}
 
           <button
             onClick={goHome}
-            className="mt-12 text-sm text-zinc-600"
+            className="mt-10 text-sm text-zinc-600"
           >
             Leave Room
           </button>
+
         </div>
       </main>
     );
@@ -292,6 +497,7 @@ export default function Home() {
   return (
     <main className="min-h-screen flex items-center justify-center bg-zinc-950 text-white p-6">
       <div className="w-full max-w-md">
+
         <div className="text-center mb-12">
           <h1 className="text-6xl font-black tracking-tight">
             HALFCLUE
@@ -335,18 +541,13 @@ export default function Home() {
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") createGame();
-              }}
               placeholder="Anthony"
               maxLength={24}
               className="w-full rounded-2xl bg-zinc-900 border border-zinc-700 px-5 py-4 text-xl outline-none"
             />
 
             {error && (
-              <p className="text-red-400 text-sm">
-                {error}
-              </p>
+              <p className="text-red-400 text-sm">{error}</p>
             )}
 
             <button
@@ -368,6 +569,7 @@ export default function Home() {
 
         {mode === "join" && (
           <div className="space-y-4">
+
             <label className="block text-sm text-zinc-400">
               Room code
             </label>
@@ -382,9 +584,9 @@ export default function Home() {
                     .slice(0, 4)
                 )
               }
-              placeholder="MRTQ"
+              placeholder="9GWD"
               maxLength={4}
-              className="w-full rounded-2xl bg-zinc-900 border border-zinc-700 px-5 py-4 text-center text-3xl font-bold tracking-[0.4em] uppercase outline-none"
+              className="w-full rounded-2xl bg-zinc-900 border border-zinc-700 px-5 py-4 text-center text-3xl font-bold tracking-[0.4em] outline-none"
             />
 
             <label className="block text-sm text-zinc-400 pt-2">
@@ -394,18 +596,13 @@ export default function Home() {
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") joinGame();
-              }}
-              placeholder="Pete"
+              placeholder="Peter"
               maxLength={24}
               className="w-full rounded-2xl bg-zinc-900 border border-zinc-700 px-5 py-4 text-xl outline-none"
             />
 
             {error && (
-              <p className="text-red-400 text-sm">
-                {error}
-              </p>
+              <p className="text-red-400 text-sm">{error}</p>
             )}
 
             <button
@@ -422,8 +619,10 @@ export default function Home() {
             >
               Back
             </button>
+
           </div>
         )}
+
       </div>
     </main>
   );
